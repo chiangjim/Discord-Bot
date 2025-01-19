@@ -1,0 +1,151 @@
+const axios = require("axios");
+const fs = require("node:fs");
+const { EmbedBuilder } = require('discord.js');
+
+module.exports = {
+  name: "messageCreate",
+  async execute(message) {
+    if (message.author.bot) return;
+
+    if (message.content.startsWith(".run")) {
+      let content = message.content.slice(4).trim();
+      var language = content.slice(3).split("\n")[0].trim();
+      let code = content
+        .split("```")[1]
+        .slice(language.length + 1)
+        .trim();
+      var version = " ";
+
+      fs.writeFile("./code/my_cool_code.txt", code, (err) => {
+        if (err) {
+          console.error(err);
+        }
+      });
+
+      async function getlanguage(language) {
+        try {
+          const response = await axios.get(
+            "https://emkc.org/api/v2/piston/runtimes",
+          );
+          for (let i = 0; i < response.data.length; i++) {
+            for (let j = 0; j < response.data[i].aliases.length; j++) {
+              if (
+                response.data[i].language === language ||
+                response.data[i].aliases[j] === language
+              ) {
+                return {
+                  first: response.data[i].language,
+                  second: response.data[i].version,
+                };
+              }
+            }
+          }
+        } catch (error) {
+          console.log("取得語言時錯誤:", error);
+        }
+        return null;
+      }
+
+      let values = await getlanguage(language);
+
+      if (values) {
+        language = values.first;
+        version = values.second;
+      } else {
+        const embed = new EmbedBuilder()
+          .setColor("#FF0000")
+          .setTitle("ERROR")
+          .setDescription("Language not found")
+          .setTimestamp()
+          .setAuthor({
+            name: message.author.username,
+            iconURL: message.author.avatarURL(),
+          });
+        return await message.reply({ embeds: [embed] });
+      }
+
+      try {
+        const response = await axios.post(
+          "https://emkc.org/api/v2/piston/execute",
+          {
+            language: language,
+            version: version,
+            files: [
+              {
+                name: "./code/my_cool_code.js",
+                content: code,
+              },
+            ],
+            stdin: "",
+            args: ["1", "2", "3"],
+            compile_timeout: 10000,
+            run_timeout: 3000,
+            compile_cpu_time: 10000,
+            run_cpu_time: 3000,
+            compile_memory_limit: -1,
+            run_memory_limit: -1,
+          },
+        );
+        fs.unlinkSync("./code/my_cool_code.txt");
+        if (response.data) {
+          if (response.data.run.stderr) {
+            let errorMessage = response.data.run.stderr;
+            let formattedError = errorMessage.replace(/\n/g, "\n");
+
+            const embedError = new EmbedBuilder()
+              .setColor("#FF0000")
+              .setTitle(language)
+              .addFields(
+                { name: 'ERROR', value: `\`\`\`\n${formattedError}\n\`\`\``}
+              )
+              .setTimestamp()
+              .setAuthor({
+                name: message.author.username,
+                iconURL: message.author.avatarURL(),
+              });
+            await message.reply({ embeds: [embedError] });
+            return;
+          }
+          if (response.data.run.stdout) {
+            let output = response.data.run.stdout.replace(/\n/g, "\n");
+
+            const embedSuccess = new EmbedBuilder()
+              .setColor("#00FF00")
+              .setTitle(language)
+            .addFields(
+              { name: 'SUCCESS', value: `\`\`\`\n${output}\n\`\`\`` }
+            )
+              .setTimestamp()
+              .setAuthor({
+                name: message.author.username,
+                iconURL: message.author.avatarURL(),
+              });
+            await message.reply({ embeds: [embedSuccess] });
+          } else {
+            const embedNoResult = new EmbedBuilder()
+              .setColor("#FFFF00")
+              .setTitle(language)
+              .setDescription("No Output")
+              .setTimestamp()
+              .setAuthor({
+                name: message.author.username,
+                iconURL: message.author.avatarURL(),
+              });
+            await message.reply({ embeds: [embedNoResult] });
+          }
+        }
+      } catch (error) {
+        const embedError = new EmbedBuilder()
+          .setColor("#FF0000")
+          .setTitle(language)
+          .setDescription("請稍後再試")
+          .setTimestamp()
+          .setAuthor({
+            name: message.author.username,
+            iconURL: message.author.avatarURL(),
+          });
+        await message.reply({ embeds: [embedError] });
+      }
+    }
+  },
+};
